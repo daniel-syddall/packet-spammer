@@ -1,0 +1,15 @@
+services:
+
+  packet-spammer:
+    build: .
+    # Share the host network namespace so the container can see and control
+    # the Pi's physical WiFi interfaces (including the USB dongle).
+    network_mode: host
+    # Required for:
+    #   • AF_PACKET raw socket access (Scapy sendp)
+    #   • iw / ip interface manipulation (monitor mode, channel setting)
+    privileged: true
+    volumes:
+      # Persist config changes made via the web UI back to the host filesystem.
+      - ./config:/app/config
+    restart: unless-stopped

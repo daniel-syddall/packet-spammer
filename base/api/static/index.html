@@ -1,0 +1,776 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Packet Spammer</title>
+    <style>
+        :root {
+            --bg:        #0f1117;
+            --surface:   #1a1d27;
+            --surface2:  #21253300;
+            --border:    #2a2d3a;
+            --text:      #e0e0e0;
+            --dim:       #888;
+            --accent:    #5b9cf6;
+            --green:     #4caf50;
+            --yellow:    #ffc107;
+            --red:       #f44336;
+            --orange:    #ff9800;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+        }
+
+        /* ── Layout ───────────────────────────────────────────── */
+        .page { max-width: 1100px; margin: 0 auto; padding: 24px 20px 48px; }
+
+        /* ── Header ───────────────────────────────────────────── */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--border);
+        }
+        .header h1 { font-size: 1.35rem; font-weight: 700; letter-spacing: -0.3px; }
+        .header h1 span { color: var(--accent); }
+        .conn-status { font-size: 0.82rem; color: var(--dim); display: flex; align-items: center; gap: 6px; }
+        .dot {
+            width: 8px; height: 8px; border-radius: 50%;
+            background: var(--dim); flex-shrink: 0;
+        }
+        .dot-online  { background: var(--green); }
+        .dot-offline { background: var(--red); }
+
+        /* ── Interface Banner ─────────────────────────────────── */
+        .iface-banner {
+            border-radius: 8px;
+            padding: 10px 16px;
+            margin-bottom: 20px;
+            font-size: 0.84rem;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .iface-banner.ok      { background: rgba(76,175,80,.12);  border: 1px solid rgba(76,175,80,.3);  color: #a5d6a7; }
+        .iface-banner.warn    { background: rgba(255,193,7,.10);  border: 1px solid rgba(255,193,7,.3);  color: #ffe082; }
+        .iface-banner.error   { background: rgba(244,67,54,.10);  border: 1px solid rgba(244,67,54,.3);  color: #ef9a9a; }
+        .iface-banner .badge  { font-family: 'Cascadia Code','Fira Code',monospace; font-size: 0.8rem; }
+
+        /* ── Stat Cards ───────────────────────────────────────── */
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 12px;
+            margin-bottom: 24px;
+        }
+        .stat-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 14px 16px;
+        }
+        .stat-card .label  { font-size: 0.72rem; color: var(--dim); text-transform: uppercase; letter-spacing: .5px; }
+        .stat-card .value  { font-size: 1.5rem; font-weight: 700; margin-top: 4px; color: var(--accent); }
+        .stat-card .sub    { font-size: 0.72rem; color: var(--dim); margin-top: 2px; }
+
+        /* Running/stopped value colours */
+        .val-running { color: var(--green) !important; }
+        .val-stopped { color: var(--dim)   !important; }
+
+        /* Blinking dot for running */
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+        .run-dot {
+            display: inline-block; width: 9px; height: 9px; border-radius: 50%;
+            background: var(--green); margin-right: 6px; vertical-align: middle;
+            animation: pulse 1.4s ease-in-out infinite;
+        }
+
+        /* ── Two-column config grid ───────────────────────────── */
+        .config-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+        @media (max-width: 700px) { .config-grid { grid-template-columns: 1fr; } }
+
+        /* ── Card ─────────────────────────────────────────────── */
+        .card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 20px;
+        }
+        .card h3 {
+            font-size: 0.78rem;
+            color: var(--dim);
+            text-transform: uppercase;
+            letter-spacing: .6px;
+            margin-bottom: 16px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        /* ── Start / Stop button ──────────────────────────────── */
+        #toggle-btn {
+            width: 100%;
+            padding: 14px;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 700;
+            letter-spacing: 1px;
+            cursor: pointer;
+            font-family: inherit;
+            transition: opacity .15s, transform .1s;
+            margin-bottom: 20px;
+        }
+        #toggle-btn:active { transform: scale(.98); }
+        #toggle-btn:disabled { opacity: .4; cursor: not-allowed; transform: none; }
+        #toggle-btn.btn-start { background: var(--green);  color: #fff; }
+        #toggle-btn.btn-stop  { background: var(--red);    color: #fff; }
+
+        /* ── Forms ────────────────────────────────────────────── */
+        .form-section { margin-top: 16px; }
+        .form-section h4 {
+            font-size: 0.74rem; color: var(--dim);
+            text-transform: uppercase; letter-spacing: .5px;
+            margin-bottom: 12px;
+        }
+        .form-row { margin-bottom: 10px; }
+        .form-row label {
+            display: block; font-size: 0.74rem;
+            color: var(--dim); margin-bottom: 4px;
+        }
+        .form-row input[type="text"],
+        .form-row input[type="number"],
+        .form-row select {
+            width: 100%;
+            padding: 7px 10px;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text);
+            font-size: 0.85rem;
+            font-family: 'Cascadia Code','Fira Code',monospace;
+            outline: none;
+            transition: border-color .15s;
+        }
+        .form-row input:focus,
+        .form-row select:focus { border-color: var(--accent); }
+        select option { background: var(--surface); }
+
+        /* MAC-row — input + random button side by side */
+        .mac-row { display: flex; gap: 6px; }
+        .mac-row input { flex: 1; min-width: 0; }
+        .btn-rand {
+            padding: 7px 10px;
+            background: transparent;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--dim);
+            font-size: 0.75rem;
+            cursor: pointer;
+            white-space: nowrap;
+            font-family: inherit;
+            flex-shrink: 0;
+        }
+        .btn-rand:hover { border-color: var(--accent); color: var(--accent); }
+
+        /* Autostart toggle row */
+        .toggle-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 0;
+        }
+        .toggle-row label { margin: 0; font-size: 0.84rem; color: var(--text); cursor: pointer; }
+
+        /* Toggle switch */
+        .toggle-switch { position: relative; width: 40px; height: 22px; }
+        .toggle-switch input { opacity: 0; width: 0; height: 0; }
+        .toggle-track {
+            position: absolute; inset: 0;
+            background: var(--border); border-radius: 11px; cursor: pointer;
+            transition: background .2s;
+        }
+        .toggle-track::before {
+            content: '';
+            position: absolute; width: 16px; height: 16px;
+            left: 3px; top: 3px;
+            background: #fff; border-radius: 50%;
+            transition: transform .2s;
+        }
+        .toggle-switch input:checked + .toggle-track { background: var(--green); }
+        .toggle-switch input:checked + .toggle-track::before { transform: translateX(18px); }
+
+        /* ── Buttons ──────────────────────────────────────────── */
+        .btn {
+            padding: 8px 16px;
+            border: none; border-radius: 6px;
+            font-size: 0.84rem; font-weight: 600;
+            cursor: pointer; font-family: inherit;
+            transition: opacity .15s;
+        }
+        .btn:hover { opacity: .85; }
+        .btn:disabled { opacity: .4; cursor: not-allowed; }
+        .btn-primary { background: var(--accent); color: #fff; }
+        .btn-full { width: 100%; margin-top: 12px; }
+
+        /* ── Toast notifications ──────────────────────────────── */
+        #toast-container {
+            position: fixed; bottom: 24px; right: 24px;
+            display: flex; flex-direction: column; gap: 8px;
+            z-index: 9999; pointer-events: none;
+        }
+        .toast {
+            padding: 10px 16px;
+            border-radius: 8px;
+            font-size: 0.83rem;
+            max-width: 320px;
+            pointer-events: auto;
+            animation: slideIn .2s ease;
+        }
+        @keyframes slideIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+        .toast-ok    { background: rgba(76,175,80,.25);  border: 1px solid rgba(76,175,80,.5);  color: #a5d6a7; }
+        .toast-err   { background: rgba(244,67,54,.25);  border: 1px solid rgba(244,67,54,.5);  color: #ef9a9a; }
+        .toast-warn  { background: rgba(255,193,7,.20);  border: 1px solid rgba(255,193,7,.4);  color: #ffe082; }
+    </style>
+</head>
+<body>
+
+<div class="page">
+
+    <!-- Header -->
+    <header class="header">
+        <h1>Packet <span>Spammer</span></h1>
+        <div class="conn-status">
+            <span class="dot" id="conn-dot"></span>
+            <span id="conn-text">Connecting…</span>
+            &nbsp;·&nbsp; Uptime: <span id="sys-uptime">—</span>
+        </div>
+    </header>
+
+    <!-- Interface Banner -->
+    <div class="iface-banner error" id="iface-banner">
+        <span id="iface-icon">⚠</span>
+        <span id="iface-text">Searching for USB WiFi adapter…</span>
+    </div>
+
+    <!-- Stat Cards -->
+    <div class="stats">
+        <div class="stat-card">
+            <div class="label">Status</div>
+            <div class="value val-stopped" id="stat-status">STOPPED</div>
+        </div>
+        <div class="stat-card">
+            <div class="label">Rate</div>
+            <div class="value" id="stat-rate">—</div>
+            <div class="sub">packets / sec</div>
+        </div>
+        <div class="stat-card">
+            <div class="label">Channel</div>
+            <div class="value" id="stat-channel">—</div>
+            <div class="sub" id="stat-freq">—</div>
+        </div>
+        <div class="stat-card">
+            <div class="label">Packets Sent</div>
+            <div class="value" id="stat-sent">0</div>
+            <div class="sub" id="stat-session">this session</div>
+        </div>
+        <div class="stat-card">
+            <div class="label">Session Time</div>
+            <div class="value" id="stat-uptime">—</div>
+        </div>
+    </div>
+
+    <!-- Config grid -->
+    <div class="config-grid">
+
+        <!-- LEFT: Transmission controls -->
+        <div class="card">
+            <h3>Transmission</h3>
+
+            <button id="toggle-btn" class="btn-start" disabled onclick="toggleSender()">
+                START
+            </button>
+
+            <div class="form-section">
+                <h4>Settings</h4>
+
+                <div class="form-row">
+                    <label>Packets per second</label>
+                    <input id="f-pps" type="number" min="1" max="1000" placeholder="10">
+                </div>
+
+                <div class="form-row">
+                    <label>Channel <span id="f-channel-freq" style="color:var(--dim);font-weight:400"></span></label>
+                    <input id="f-channel" type="number" min="1" max="165" placeholder="6"
+                           oninput="updateChannelHint()">
+                </div>
+
+                <div class="toggle-row" style="margin-top:12px">
+                    <label for="f-autostart">Autostart on boot</label>
+                    <label class="toggle-switch">
+                        <input id="f-autostart" type="checkbox" onchange="applyAutostart()">
+                        <span class="toggle-track"></span>
+                    </label>
+                </div>
+
+                <button class="btn btn-primary btn-full" onclick="applySettings()">
+                    Apply Settings
+                </button>
+            </div>
+        </div>
+
+        <!-- RIGHT: Packet config -->
+        <div class="card">
+            <h3>Packet</h3>
+
+            <div class="form-row">
+                <label>Frame Type</label>
+                <select id="f-type" onchange="onTypeChange()">
+                    <option value="deauth">Deauthentication</option>
+                    <option value="beacon">Beacon</option>
+                    <option value="probe_req">Probe Request</option>
+                    <option value="disassoc">Disassociation</option>
+                    <option value="auth">Authentication</option>
+                </select>
+            </div>
+
+            <div id="packet-fields" style="margin-top:12px"></div>
+
+            <button class="btn btn-primary btn-full" onclick="applyPacket()">
+                Apply Packet
+            </button>
+        </div>
+
+    </div><!-- /config-grid -->
+
+</div><!-- /page -->
+
+<!-- Toast container -->
+<div id="toast-container"></div>
+
+<script>
+"use strict";
+
+// ── Constants ──────────────────────────────────────────────────────────── //
+
+const POLL_MS = 1200;
+
+// Common 802.11 reason codes
+const DEAUTH_REASONS = [
+    [1,  "1 — Unspecified"],
+    [2,  "2 — Authentication expired"],
+    [3,  "3 — STA leaving IBSS/ESS"],
+    [4,  "4 — Inactivity timeout"],
+    [6,  "6 — Class 2 frame from non-auth STA"],
+    [7,  "7 — Class 3 frame from non-assoc STA"],
+    [8,  "8 — STA leaving BSS"],
+    [9,  "9 — STA not authenticated with AP"],
+];
+const DISASSOC_REASONS = [
+    [1,  "1 — Unspecified"],
+    [3,  "3 — STA leaving BSS"],
+    [4,  "4 — Inactivity timeout"],
+    [5,  "5 — AP cannot handle all associations"],
+    [8,  "8 — STA leaving BSS"],
+];
+const AUTH_ALGOS = [
+    [0, "0 — Open System"],
+    [1, "1 — Shared Key"],
+];
+
+// Per-type field schemas
+// field types: "mac", "text", "number", "select"
+const SCHEMAS = {
+    deauth: [
+        { id:"source_mac", label:"Source MAC (spoofed AP)",   type:"mac"    },
+        { id:"dest_mac",   label:"Destination MAC (target)",  type:"mac"    },
+        { id:"bssid",      label:"BSSID",                     type:"mac"    },
+        { id:"reason",     label:"Reason Code",               type:"select", options: DEAUTH_REASONS },
+    ],
+    beacon: [
+        { id:"ssid",       label:"SSID (network name)",       type:"text"   },
+        { id:"source_mac", label:"Source MAC / BSSID",        type:"mac"    },
+        { id:"bssid",      label:"BSSID",                     type:"mac"    },
+    ],
+    probe_req: [
+        { id:"source_mac", label:"Source MAC",                type:"mac"    },
+        { id:"ssid",       label:"SSID (empty = wildcard)",   type:"text", placeholder:"" },
+    ],
+    disassoc: [
+        { id:"source_mac", label:"Source MAC (spoofed AP)",   type:"mac"    },
+        { id:"dest_mac",   label:"Destination MAC (target)",  type:"mac"    },
+        { id:"bssid",      label:"BSSID",                     type:"mac"    },
+        { id:"reason",     label:"Reason Code",               type:"select", options: DISASSOC_REASONS },
+    ],
+    auth: [
+        { id:"source_mac", label:"Source MAC",                type:"mac"    },
+        { id:"dest_mac",   label:"Destination MAC",           type:"mac"    },
+        { id:"bssid",      label:"BSSID",                     type:"mac"    },
+        { id:"algo",       label:"Algorithm",                 type:"select", options: AUTH_ALGOS },
+        { id:"seq",        label:"Sequence Number",           type:"number", min:1, max:4 },
+    ],
+};
+
+// ── State ──────────────────────────────────────────────────────────────── //
+
+let _running        = false;
+let _ifaceReady     = false;
+let _initialised    = false;   // true once forms have been populated
+
+// ── API helpers ────────────────────────────────────────────────────────── //
+
+async function apiFetch(path, opts = {}) {
+    const r = await fetch(path, opts);
+    if (!r.ok) {
+        const err = await r.json().catch(() => ({ detail: r.statusText }));
+        throw new Error(err.detail ?? r.statusText);
+    }
+    return r.json();
+}
+
+async function apiGet(path)         { return apiFetch(path); }
+async function apiPost(path, body)  { return apiFetch(path, { method:'POST', headers:{'Content-Type':'application/json'}, body: body ? JSON.stringify(body) : undefined }); }
+async function apiPut(path, body)   { return apiFetch(path, { method:'PUT',  headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) }); }
+
+// ── Toast ──────────────────────────────────────────────────────────────── //
+
+function toast(msg, kind = 'ok', ms = 2800) {
+    const el = document.createElement('div');
+    el.className = `toast toast-${kind}`;
+    el.textContent = msg;
+    document.getElementById('toast-container').appendChild(el);
+    setTimeout(() => el.remove(), ms);
+}
+
+// ── Channel → frequency ────────────────────────────────────────────────── //
+
+function chToFreq(ch) {
+    ch = parseInt(ch, 10);
+    if (isNaN(ch)) return null;
+    if (ch >= 1  && ch <= 13) return 2407 + ch * 5;
+    if (ch === 14)             return 2484;
+    if (ch >= 36 && ch <= 165) return 5000 + ch * 5;
+    return null;
+}
+
+function chLabel(ch) {
+    const f = chToFreq(ch);
+    if (f === null) return '';
+    return f >= 5000 ? `· ${f} MHz (5 GHz)` : `· ${f} MHz (2.4 GHz)`;
+}
+
+function updateChannelHint() {
+    const ch = document.getElementById('f-channel').value;
+    document.getElementById('f-channel-freq').textContent = chLabel(ch);
+}
+
+// ── Number formatter ───────────────────────────────────────────────────── //
+
+function fmt(n) { return Number(n).toLocaleString(); }
+
+function fmtUptime(sec) {
+    if (!sec || sec <= 0) return '—';
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = Math.floor(sec % 60);
+    if (h > 0) return `${h}h ${String(m).padStart(2,'0')}m ${String(s).padStart(2,'0')}s`;
+    if (m > 0) return `${m}m ${String(s).padStart(2,'0')}s`;
+    return `${s}s`;
+}
+
+// ── MAC helper ─────────────────────────────────────────────────────────── //
+
+function randomMac() {
+    return Array.from({length: 6}, (_, i) => {
+        let b = Math.floor(Math.random() * 256);
+        if (i === 0) b = (b & 0xfe) | 0x02; // locally-administered unicast
+        return b.toString(16).padStart(2, '0');
+    }).join(':');
+}
+
+// ── Interface banner ───────────────────────────────────────────────────── //
+
+function updateIfaceBanner(s) {
+    const banner = document.getElementById('iface-banner');
+    const icon   = document.getElementById('iface-icon');
+    const text   = document.getElementById('iface-text');
+
+    if (s.interface_ready && s.interface) {
+        banner.className = 'iface-banner ok';
+        icon.textContent = '✔';
+        const f = chToFreq(s.channel);
+        const fStr = f ? ` · ${f} MHz` : '';
+        text.innerHTML = `Interface: <span class="badge">${s.interface}</span> &nbsp;|&nbsp; Monitor Mode &nbsp;|&nbsp; Channel ${s.channel}${fStr}`;
+    } else if (s.interface_error) {
+        banner.className = 'iface-banner error';
+        icon.textContent = '⚠';
+        text.textContent = s.interface_error;
+    } else {
+        banner.className = 'iface-banner warn';
+        icon.textContent = '⟳';
+        text.textContent = 'Searching for USB WiFi adapter…';
+    }
+}
+
+// ── Stat cards ─────────────────────────────────────────────────────────── //
+
+function updateStats(s) {
+    // Status
+    const statusEl = document.getElementById('stat-status');
+    if (s.running) {
+        statusEl.innerHTML = '<span class="run-dot"></span>RUNNING';
+        statusEl.className = 'value val-running';
+    } else {
+        statusEl.textContent = 'STOPPED';
+        statusEl.className = 'value val-stopped';
+    }
+
+    document.getElementById('stat-rate').textContent    = fmt(s.packets_per_second);
+    document.getElementById('stat-channel').textContent = s.channel;
+    document.getElementById('stat-freq').textContent    = chLabel(s.channel);
+    document.getElementById('stat-sent').textContent    = fmt(s.packets_sent);
+    document.getElementById('stat-session').textContent = s.running ? 'this session' : 'last session';
+    document.getElementById('stat-uptime').textContent  = fmtUptime(s.session_uptime);
+}
+
+// ── Toggle button ──────────────────────────────────────────────────────── //
+
+function updateToggleBtn(running, ifaceReady) {
+    const btn = document.getElementById('toggle-btn');
+    btn.disabled = !ifaceReady;
+    if (running) {
+        btn.textContent = 'STOP';
+        btn.className = 'btn-stop';
+    } else {
+        btn.textContent = 'START';
+        btn.className = 'btn-start';
+    }
+}
+
+// ── Sender toggle ──────────────────────────────────────────────────────── //
+
+async function toggleSender() {
+    const btn = document.getElementById('toggle-btn');
+    btn.disabled = true;
+    try {
+        if (_running) {
+            await apiPost('/api/sender/stop');
+            _running = false;
+            toast('Transmission stopped', 'warn');
+        } else {
+            await apiPost('/api/sender/start');
+            _running = true;
+            toast('Transmission started', 'ok');
+        }
+    } catch (e) {
+        toast(`Error: ${e.message}`, 'err');
+    } finally {
+        updateToggleBtn(_running, _ifaceReady);
+    }
+}
+
+// ── Apply Settings ─────────────────────────────────────────────────────── //
+
+async function applySettings() {
+    const pps     = parseInt(document.getElementById('f-pps').value, 10);
+    const channel = parseInt(document.getElementById('f-channel').value, 10);
+
+    if (isNaN(pps) || pps < 1) { toast('Rate must be ≥ 1', 'err'); return; }
+    if (isNaN(channel) || channel < 1 || channel > 165) { toast('Channel must be 1–165', 'err'); return; }
+
+    try {
+        await apiPut('/api/config/sender', { packets_per_second: pps, channel });
+        toast('Settings applied', 'ok');
+    } catch (e) {
+        toast(`Error: ${e.message}`, 'err');
+    }
+}
+
+// Autostart fires immediately on toggle change
+async function applyAutostart() {
+    const enabled = document.getElementById('f-autostart').checked;
+    try {
+        await apiPut('/api/config/sender', { autostart: enabled });
+        toast(`Autostart ${enabled ? 'enabled' : 'disabled'}`, 'ok');
+    } catch (e) {
+        document.getElementById('f-autostart').checked = !enabled; // revert
+        toast(`Error: ${e.message}`, 'err');
+    }
+}
+
+// ── Packet form rendering ──────────────────────────────────────────────── //
+
+function renderPacketFields(type, values = {}) {
+    const schema = SCHEMAS[type];
+    if (!schema) return;
+    const container = document.getElementById('packet-fields');
+    container.innerHTML = '';
+
+    for (const f of schema) {
+        const row = document.createElement('div');
+        row.className = 'form-row';
+
+        const label = document.createElement('label');
+        label.textContent = f.label;
+        row.appendChild(label);
+
+        if (f.type === 'select') {
+            const sel = document.createElement('select');
+            sel.id = `pf-${f.id}`;
+            for (const [val, txt] of f.options) {
+                const opt = document.createElement('option');
+                opt.value = val;
+                opt.textContent = txt;
+                sel.appendChild(opt);
+            }
+            if (values[f.id] !== undefined) sel.value = values[f.id];
+            row.appendChild(sel);
+
+        } else if (f.type === 'mac') {
+            const macRow = document.createElement('div');
+            macRow.className = 'mac-row';
+
+            const inp = document.createElement('input');
+            inp.type = 'text';
+            inp.id = `pf-${f.id}`;
+            inp.placeholder = 'aa:bb:cc:dd:ee:ff';
+            inp.value = values[f.id] ?? 'aa:bb:cc:dd:ee:ff';
+            inp.maxLength = 17;
+            inp.spellcheck = false;
+            macRow.appendChild(inp);
+
+            const rnd = document.createElement('button');
+            rnd.className = 'btn-rand';
+            rnd.textContent = 'Random';
+            rnd.type = 'button';
+            rnd.onclick = () => { inp.value = randomMac(); };
+            macRow.appendChild(rnd);
+
+            row.appendChild(macRow);
+
+        } else {
+            const inp = document.createElement('input');
+            inp.type = f.type === 'number' ? 'number' : 'text';
+            inp.id = `pf-${f.id}`;
+            inp.placeholder = f.placeholder ?? '';
+            inp.value = values[f.id] ?? '';
+            if (f.min !== undefined) inp.min = f.min;
+            if (f.max !== undefined) inp.max = f.max;
+            inp.spellcheck = false;
+            row.appendChild(inp);
+        }
+
+        container.appendChild(row);
+    }
+}
+
+function onTypeChange() {
+    const type = document.getElementById('f-type').value;
+    renderPacketFields(type);
+}
+
+// ── Apply Packet ───────────────────────────────────────────────────────── //
+
+async function applyPacket() {
+    const type   = document.getElementById('f-type').value;
+    const schema = SCHEMAS[type];
+    if (!schema) return;
+
+    const body = { type };
+    for (const f of schema) {
+        const el = document.getElementById(`pf-${f.id}`);
+        if (!el) continue;
+
+        if (f.type === 'number' || f.type === 'select') {
+            body[f.id] = parseInt(el.value, 10);
+        } else {
+            body[f.id] = el.value.trim();
+        }
+    }
+
+    // Basic MAC validation
+    const macRe = /^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$/;
+    for (const f of schema) {
+        if (f.type === 'mac' && !macRe.test(body[f.id])) {
+            toast(`Invalid MAC address for "${f.label}"`, 'err');
+            return;
+        }
+    }
+
+    try {
+        await apiPut('/api/config/packet', body);
+        toast('Packet applied', 'ok');
+    } catch (e) {
+        toast(`Error: ${e.message}`, 'err');
+    }
+}
+
+// ── Initial form population ────────────────────────────────────────────── //
+
+function populateForms(s) {
+    document.getElementById('f-pps').value     = s.packets_per_second ?? 10;
+    document.getElementById('f-channel').value = s.channel ?? 6;
+    document.getElementById('f-autostart').checked = !!s.autostart;
+    updateChannelHint();
+
+    const pkt = s.packet ?? {};
+    const type = pkt.type ?? 'deauth';
+    document.getElementById('f-type').value = type;
+    renderPacketFields(type, pkt);
+}
+
+// ── Poll loop ──────────────────────────────────────────────────────────── //
+
+async function refreshStatus() {
+    try {
+        const sys = await apiGet('/api/status');
+        document.getElementById('sys-uptime').textContent  = fmtUptime(sys.uptime);
+        document.getElementById('conn-dot').className      = 'dot dot-online';
+        document.getElementById('conn-text').textContent   = 'Connected';
+    } catch {
+        document.getElementById('conn-dot').className  = 'dot dot-offline';
+        document.getElementById('conn-text').textContent = 'Disconnected';
+    }
+}
+
+async function refreshSender() {
+    try {
+        const s = await apiGet('/api/sender/status');
+
+        _running    = s.running;
+        _ifaceReady = s.interface_ready;
+
+        updateStats(s);
+        updateToggleBtn(s.running, s.interface_ready);
+        updateIfaceBanner(s);
+
+        if (!_initialised) {
+            populateForms(s);
+            _initialised = true;
+        }
+    } catch {
+        // Sender status fetch failed — don't update UI
+    }
+}
+
+async function refresh() {
+    await Promise.all([refreshStatus(), refreshSender()]);
+}
+
+refresh();
+setInterval(refresh, POLL_MS);
+</script>
+</body>
+</html>

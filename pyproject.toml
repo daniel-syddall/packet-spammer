@@ -1,0 +1,22 @@
+[project]
+name = "packet-spammer"
+version = "1.0.0"
+description = "802.11 packet injection tool with web UI"
+requires-python = ">=3.13"
+dependencies = [
+    "pydantic>=2.0",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "scapy>=2.5",
+    "tomli>=2.0;python_version<'3.11'",
+    "tomli-w>=1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+]
+
+[project.scripts]
+spammer = "run:main"

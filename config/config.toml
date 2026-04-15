@@ -1,0 +1,39 @@
+# ── Packet Spammer Configuration ─────────────────────────────────────────
+#
+# All values here can be changed via the web UI at runtime.
+# The web UI writes changes back to this file automatically.
+
+# ── Web UI ────────────────────────────────────────────────────────────────
+
+[api]
+enabled = true
+host    = "0.0.0.0"
+port    = 8080
+
+# ── Sender ────────────────────────────────────────────────────────────────
+
+[sender]
+# Start transmitting immediately when the container boots.
+autostart = false
+
+# How many frames to inject per second.
+packets_per_second = 10
+
+# 802.11 channel to inject on.
+# 2.4 GHz: 1–13 (14 = Japan only)
+# 5   GHz: 36, 40, 44, 48, 52 … 165
+channel = 6
+
+# ── Packet ────────────────────────────────────────────────────────────────
+#
+# type must be one of: deauth | beacon | probe_req | disassoc | auth
+#
+# The fields below depend on the selected type.  Change the type and
+# replace the fields to match — the web UI validates and saves them for you.
+
+[packet]
+type       = "deauth"
+source_mac = "aa:bb:cc:dd:ee:ff"
+dest_mac   = "ff:ff:ff:ff:ff:ff"
+bssid      = "aa:bb:cc:dd:ee:ff"
+reason     = 7
