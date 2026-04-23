@@ -1,11 +1,18 @@
 """Beacon sequence task engine.
 
-Cycles through a sequence of beacon SSIDs:
-  {task_name}-{seq_num}-{pos}   (pos = 1 … sequence_length)
+Each SSID in the sequence {task_name}-{seq_num}-{pos} gets exactly ONE packet.
+Interfaces act as a dispatcher pool: each worker atomically claims the next
+position from a shared counter, builds the frame for that SSID, sends one
+packet, then immediately claims the next available position.
 
-A sequencer thread advances to the next SSID every second while worker
-threads inject the current frame at the configured rate.  When the full
-sequence is exhausted seq_num increments and pos resets to 1.
+  seq_counter=0  → seq-1-1  claimed by wlan1
+  seq_counter=1  → seq-1-2  claimed by wlan2
+  seq_counter=2  → seq-1-3  claimed by wlan1   (wlan1 finished first)
+  ...
+
+Total sequence throughput ≈ n_interfaces × packets_per_second.
+Minor out-of-order delivery between interfaces (e.g. seq-1-24 arriving
+before seq-1-23) is expected and acceptable.
 """
 
 import logging
@@ -17,26 +24,28 @@ from app.sender.tasks.base import BaseTaskEngine
 
 logger = logging.getLogger(__name__)
 
-_DWELL_SECONDS = 1.0  # time spent broadcasting each SSID
-
 
 class BeaconSequenceEngine(BaseTaskEngine):
-    """All interfaces broadcast the same SSID; a sequencer rotates through them."""
+    """Dispatcher-pool beacon sequence: one packet per SSID, split across interfaces."""
 
     def __init__(self) -> None:
         super().__init__()
-        self._frame = None
         self._pps: int = 10
         self._task_name: str = "seq"
         self._sequence_length: int = 100
         self._channel: int = 6
         self._source_mac: str = "aa:bb:cc:dd:ee:ff"
         self._bssid: str = "aa:bb:cc:dd:ee:ff"
-        self._current_seq_num: int = 1
-        self._current_pos: int = 1
+
+        # Shared position counter — each worker atomically claims the next slot.
+        self._seq_counter: int = 0
+        self._counter_lock = threading.Lock()
+
+        # Display-only: last SSID dispatched to any interface (last writer wins).
+        self._current_ssid: str = ""
+
         self._stop_event = threading.Event()
         self._workers: list[threading.Thread] = []
-        self._sequencer: threading.Thread | None = None
 
     # ======================== Configuration ======================== #
 
@@ -55,10 +64,17 @@ class BeaconSequenceEngine(BaseTaskEngine):
         self._pps = max(1, pps)
         self._source_mac = source_mac
         self._bssid = bssid
-        self._frame = self._build_frame(1, 1)
+        self._current_ssid = f"{task_name}-1-1"
 
     def update_rate(self, pps: int) -> None:
         self._pps = max(1, pps)
+
+    # ======================== Status ======================== #
+
+    def status(self) -> dict:
+        s = super().status()
+        s["current_ssid"] = self._current_ssid
+        return s
 
     # ======================== Lifecycle ======================== #
 
@@ -70,6 +86,8 @@ class BeaconSequenceEngine(BaseTaskEngine):
 
         self._packets_sent = 0
         self._session_start = time.monotonic()
+        self._seq_counter = 0
+        self._current_ssid = f"{self._task_name}-1-1"
         self._stop_event.clear()
         self._running = True
         self._workers = []
@@ -84,13 +102,12 @@ class BeaconSequenceEngine(BaseTaskEngine):
             t.start()
             self._workers.append(t)
 
-        self._sequencer = threading.Thread(
-            target=self._sequencer_loop,
-            name="bseq-sequencer",
-            daemon=True,
+        logger.info(
+            "BeaconSequenceEngine started on %d interface(s) "
+            "(1 packet/SSID, total rate ≈ %d pps)",
+            len(interfaces),
+            len(interfaces) * self._pps,
         )
-        self._sequencer.start()
-        logger.info("BeaconSequenceEngine started on %d interface(s)", len(interfaces))
 
     def stop(self) -> None:
         if not self._running:
@@ -100,15 +117,27 @@ class BeaconSequenceEngine(BaseTaskEngine):
         for t in self._workers:
             if t.is_alive():
                 t.join(timeout=2.0)
-        if self._sequencer and self._sequencer.is_alive():
-            self._sequencer.join(timeout=2.0)
         self._workers = []
-        self._sequencer = None
         logger.info(
-            "BeaconSequenceEngine stopped — %d packets this session", self._packets_sent
+            "BeaconSequenceEngine stopped — %d packets sent, last SSID: %s",
+            self._packets_sent,
+            self._current_ssid,
         )
 
-    # ======================== Threads ======================== #
+    # ======================== Worker ======================== #
+
+    def _claim_next(self) -> tuple[int, int]:
+        """Atomically claim the next sequence position.
+
+        Returns (seq_num, pos) where pos ∈ [1, sequence_length] and
+        seq_num increments every time pos wraps around.
+        """
+        with self._counter_lock:
+            n = self._seq_counter
+            self._seq_counter += 1
+        seq_num = (n // self._sequence_length) + 1
+        pos     = (n % self._sequence_length) + 1
+        return seq_num, pos
 
     def _build_frame(self, seq_num: int, pos: int):
         from scapy.layers.dot11 import RadioTap, Dot11, Dot11Beacon, Dot11Elt
@@ -129,28 +158,6 @@ class BeaconSequenceEngine(BaseTaskEngine):
             / Dot11Elt(ID="DSset", info=bytes([self._channel]))
         )
 
-    def status(self) -> dict:
-        s = super().status()
-        s["current_ssid"] = f"{self._task_name}-{self._current_seq_num}-{self._current_pos}"
-        return s
-
-    def _sequencer_loop(self) -> None:
-        """Advances through seq_num / pos at a fixed 1-second dwell per SSID."""
-        seq_num = 1
-        pos = 1
-        while not self._stop_event.is_set():
-            self._current_seq_num = seq_num
-            self._current_pos = pos
-            self._frame = self._build_frame(seq_num, pos)
-            logger.debug(
-                "BeaconSeq: ssid=%s-%d-%d", self._task_name, seq_num, pos
-            )
-            self._stop_event.wait(_DWELL_SECONDS)
-            pos += 1
-            if pos > self._sequence_length:
-                pos = 1
-                seq_num += 1
-
     def _worker_loop(self, iface: str) -> None:
         from scapy.all import sendp  # noqa: PLC0415
 
@@ -158,18 +165,19 @@ class BeaconSequenceEngine(BaseTaskEngine):
         while not self._stop_event.is_set():
             now = time.monotonic()
             if now >= next_send:
-                frame = self._frame
-                pps = self._pps
-                if frame is not None:
-                    try:
-                        sendp(frame, iface=iface, verbose=0, count=1)
-                        self._packets_sent += 1
-                    except OSError as exc:
-                        logger.error("sendp OSError on %s: %s", iface, exc)
-                        self._stop_event.wait(1.0)
-                    except Exception as exc:  # noqa: BLE001
-                        logger.error("Unexpected send error on %s: %s", iface, exc)
-                next_send += 1.0 / max(1, pps)
+                # Claim one position — this is unique to this worker at this instant.
+                seq_num, pos = self._claim_next()
+                self._current_ssid = f"{self._task_name}-{seq_num}-{pos}"
+                frame = self._build_frame(seq_num, pos)
+                try:
+                    sendp(frame, iface=iface, verbose=0, count=1)
+                    self._packets_sent += 1
+                except OSError as exc:
+                    logger.error("sendp OSError on %s: %s", iface, exc)
+                    self._stop_event.wait(1.0)
+                except Exception as exc:  # noqa: BLE001
+                    logger.error("Unexpected send error on %s: %s", iface, exc)
+                next_send += 1.0 / max(1, self._pps)
                 if next_send < now - 1.0:
                     next_send = now
             else:
