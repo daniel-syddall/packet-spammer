@@ -144,6 +144,22 @@ async def stop_task(task_id: str) -> dict[str, str]:
     return {"status": "stopped", "id": task_id}
 
 
+@router.post("/tasks/{task_id}/autostart")
+async def set_task_autostart(task_id: str, body: dict[str, Any]) -> dict[str, Any]:
+    """Toggle the autostart flag for a task without restarting it.
+
+    Body: ``{"enabled": true}`` or ``{"enabled": false}``
+    """
+    enabled = bool(body.get("enabled", False))
+    for t in _config.tasks:
+        if t.id == task_id:
+            t.autostart = enabled
+            _save_fn()
+            logger.info("Task %r autostart → %s", task_id, enabled)
+            return {"status": "ok", "id": task_id, "autostart": enabled}
+    raise HTTPException(status_code=404, detail=f"Task {task_id!r} not found")
+
+
 # ======================== Full Config ======================== #
 
 @router.get("/config")

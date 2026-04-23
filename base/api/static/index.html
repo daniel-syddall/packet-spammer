@@ -101,6 +101,8 @@
     .btn-danger  { background: var(--red);    color: #fff; }
     .btn-ghost   { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
     .btn-sm      { padding: 5px 11px; font-size: 12px; }
+    .btn-autostart     { background: var(--surface2); color: var(--muted); border: 1px solid var(--border); margin-left: auto; }
+    .btn-autostart.on  { background: #2d2a00; color: var(--yellow); border-color: var(--yellow); }
 
     /* ── Task Grid ─────────────────────────────────────────────────── */
     #task-grid {
@@ -331,6 +333,16 @@
         </div>
       </div>
 
+      <!-- Autostart toggle -->
+      <div class="field-group" style="flex-direction:row;align-items:center;gap:10px">
+        <input type="checkbox" id="f-autostart"
+          style="width:16px;height:16px;cursor:pointer;accent-color:var(--accent);flex-shrink:0" />
+        <label for="f-autostart"
+          style="text-transform:none;font-size:14px;color:var(--text);font-weight:500;cursor:pointer;letter-spacing:0">
+          Auto-start on Pi boot
+        </label>
+      </div>
+
       <!-- Dynamic task-level fields -->
       <div id="task-type-fields"></div>
 
@@ -530,31 +542,47 @@ function renderTasks() {
 }
 
 function renderCard(t) {
-  const running = !!t.running;
-  const cfg     = t.config || {};
+  const running   = !!t.running;
+  const cfg       = t.config || {};
+  const autostart = !!t.autostart;
 
   const statusBadge = running
     ? `<span class="badge badge-running"><span class="pulse"></span> RUNNING</span>`
     : `<span class="badge badge-stopped">STOPPED</span>`;
 
-  let extraStats = "";
+  // Actual achieved rate (total packets / uptime, across all workers)
+  const actualRate = running && t.actual_pps > 0
+    ? `${t.actual_pps} pps`
+    : (t.packets_sent > 0 ? `${t.actual_pps} pps` : "—");
+
+  // Type-specific info cell (right column of row 2)
+  let infoCell = "";
   if (t.type === "standard") {
-    extraStats = `
-      <div class="stat-item"><span class="stat-label">Channel</span><span class="stat-value">ch ${cfg.channel ?? "?"}</span></div>
-      <div class="stat-item"><span class="stat-label">Rate</span><span class="stat-value">${cfg.packets_per_second ?? "?"} pps</span></div>`;
+    infoCell = `<div class="stat-item">
+      <span class="stat-label">Channel</span>
+      <span class="stat-value">ch ${cfg.channel ?? "?"}</span>
+    </div>`;
   } else if (t.type === "span") {
-    extraStats = `
-      <div class="stat-item"><span class="stat-label">Channels</span><span class="stat-value sm">${(cfg.channels || []).join(", ")}</span></div>
-      <div class="stat-item"><span class="stat-label">Dwell / Rate</span><span class="stat-value sm">${cfg.dwell_ms}ms · ${cfg.packets_per_second}pps</span></div>`;
+    infoCell = `<div class="stat-item">
+      <span class="stat-label">Channels · Dwell</span>
+      <span class="stat-value sm">${(cfg.channels || []).join(", ")} · ${cfg.dwell_ms}ms</span>
+    </div>`;
   } else if (t.type === "beacon_sequence") {
-    extraStats = `
-      <div class="stat-item"><span class="stat-label">SSID Pattern</span><span class="stat-value sm">${esc(cfg.task_name)}-N-N</span></div>
-      <div class="stat-item"><span class="stat-label">Seq Len / Rate</span><span class="stat-value sm">${cfg.sequence_length} · ${cfg.packets_per_second}pps</span></div>`;
+    // Show the live current SSID when running, otherwise the pattern
+    const ssidDisplay = (running && t.current_ssid)
+      ? esc(t.current_ssid)
+      : `${esc(cfg.task_name || "seq")}-N-N`;
+    infoCell = `<div class="stat-item">
+      <span class="stat-label">Current SSID</span>
+      <span class="stat-value sm">${ssidDisplay}</span>
+    </div>`;
   }
 
-  const noPool  = !poolData.ready;
-  const startDis = noPool || running  ? "disabled" : "";
-  const stopDis  = !running            ? "disabled" : "";
+  const noPool   = !poolData.ready;
+  const startDis = noPool || running ? "disabled" : "";
+  const stopDis  = !running          ? "disabled" : "";
+  const autoCls  = autostart ? "btn-autostart on" : "btn-autostart";
+  const autoTip  = autostart ? "⚡ Autostart ON" : "Autostart OFF";
 
   return `
   <div class="task-card ${running ? "running" : ""}">
@@ -574,13 +602,18 @@ function renderCard(t) {
         <span class="stat-label">Session Time</span>
         <span class="stat-value">${t.session_uptime > 0 ? fmtTime(t.session_uptime) : "—"}</span>
       </div>
-      ${extraStats}
+      <div class="stat-item">
+        <span class="stat-label">Actual Rate</span>
+        <span class="stat-value ${running ? "running" : ""}">${actualRate}</span>
+      </div>
+      ${infoCell}
     </div>
     <div class="task-card-footer">
       <button class="btn btn-success btn-sm" ${startDis} onclick="taskStart('${t.id}')">Start</button>
       <button class="btn btn-ghost  btn-sm" ${stopDis}  onclick="taskStop('${t.id}')">Stop</button>
       <button class="btn btn-ghost  btn-sm" onclick="openEditModal('${t.id}')">Edit</button>
       <button class="btn btn-danger btn-sm" onclick="confirmDelete('${t.id}','${esc(t.name)}')">Delete</button>
+      <button class="btn btn-sm ${autoCls}" onclick="toggleAutostart('${t.id}', ${!autostart})">${autoTip}</button>
     </div>
   </div>`;
 }
@@ -618,6 +651,7 @@ function openAddModal() {
   document.getElementById("modal-title").textContent = "Add Task";
   document.getElementById("f-name").value  = "";
   document.getElementById("f-type").value  = "standard";
+  document.getElementById("f-autostart").checked = false;
   document.getElementById("f-packet-type").value = "deauth";
   onTypeChange();
   document.getElementById("modal-overlay").classList.remove("hidden");
@@ -631,6 +665,7 @@ function openEditModal(id) {
   document.getElementById("modal-title").textContent = "Edit Task";
   document.getElementById("f-name").value = t.name;
   document.getElementById("f-type").value = t.type;
+  document.getElementById("f-autostart").checked = !!t.autostart;
   onTypeChange(cfg);
   if (t.type !== "beacon_sequence" && cfg.packet) {
     document.getElementById("f-packet-type").value = cfg.packet.type;
@@ -727,7 +762,8 @@ async function submitModal() {
   const type = document.getElementById("f-type").value;
   const name = document.getElementById("f-name").value.trim() || "Unnamed Task";
 
-  const body = { type, name, enabled: false };
+  const autostart = document.getElementById("f-autostart").checked;
+  const body = { type, name, enabled: false, autostart };
 
   for (const f of TASK_SCHEMAS[type] || []) {
     const el = document.getElementById(`tf-${f.id}`);
@@ -764,6 +800,17 @@ async function submitModal() {
     poll();
   } catch(e) {
     toast(`Save failed: ${e.message}`, "error");
+  }
+}
+
+// ── Autostart Toggle ───────────────────────────────────────────────────────
+async function toggleAutostart(id, enable) {
+  try {
+    await api("POST", `/api/tasks/${id}/autostart`, { enabled: enable });
+    toast(enable ? "Autostart enabled" : "Autostart disabled");
+    poll();
+  } catch(e) {
+    toast(`Autostart toggle failed: ${e.message}`, "error");
   }
 }
 

@@ -130,12 +130,14 @@ class TaskManager:
                     "name": task_cfg.name,
                     "type": task_cfg.type,
                     "enabled": task_cfg.enabled,
+                    "autostart": task_cfg.autostart,
                     "config": task_cfg.model_dump(),
                 }
                 s.update(engine.status() if engine else {
                     "running": False,
                     "packets_sent": 0,
                     "session_uptime": 0.0,
+                    "actual_pps": 0.0,
                 })
                 result.append(s)
             return result

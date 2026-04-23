@@ -32,6 +32,8 @@ class BeaconSequenceEngine(BaseTaskEngine):
         self._channel: int = 6
         self._source_mac: str = "aa:bb:cc:dd:ee:ff"
         self._bssid: str = "aa:bb:cc:dd:ee:ff"
+        self._current_seq_num: int = 1
+        self._current_pos: int = 1
         self._stop_event = threading.Event()
         self._workers: list[threading.Thread] = []
         self._sequencer: threading.Thread | None = None
@@ -127,11 +129,18 @@ class BeaconSequenceEngine(BaseTaskEngine):
             / Dot11Elt(ID="DSset", info=bytes([self._channel]))
         )
 
+    def status(self) -> dict:
+        s = super().status()
+        s["current_ssid"] = f"{self._task_name}-{self._current_seq_num}-{self._current_pos}"
+        return s
+
     def _sequencer_loop(self) -> None:
         """Advances through seq_num / pos at a fixed 1-second dwell per SSID."""
         seq_num = 1
         pos = 1
         while not self._stop_event.is_set():
+            self._current_seq_num = seq_num
+            self._current_pos = pos
             self._frame = self._build_frame(seq_num, pos)
             logger.debug(
                 "BeaconSeq: ssid=%s-%d-%d", self._task_name, seq_num, pos

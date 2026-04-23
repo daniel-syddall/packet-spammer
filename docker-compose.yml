@@ -2,6 +2,7 @@ services:
 
   packet-spammer:
     build: .
+    image: packet-spammer:latest
     # Share the host network namespace so the container can see and control
     # the Pi's physical WiFi interfaces (including the USB dongle).
     network_mode: host

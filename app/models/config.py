@@ -80,6 +80,7 @@ class StandardTaskConfig(BaseModel):
     id: str = Field(default_factory=_new_id)
     name: str = "Standard Task"
     enabled: bool = False
+    autostart: bool = False
     channel: int = 6
     packets_per_second: int = 10
     packet: PacketConfig = Field(default_factory=DeauthPacketConfig)
@@ -91,6 +92,7 @@ class SpanTaskConfig(BaseModel):
     id: str = Field(default_factory=_new_id)
     name: str = "Span Task"
     enabled: bool = False
+    autostart: bool = False
     channels: list[int] = Field(default_factory=lambda: [1, 6, 11])
     dwell_ms: int = 1000
     packets_per_second: int = 10
@@ -103,6 +105,7 @@ class BeaconSequenceTaskConfig(BaseModel):
     id: str = Field(default_factory=_new_id)
     name: str = "Beacon Sequence"
     enabled: bool = False
+    autostart: bool = False
     task_name: str = "seq"
     sequence_length: int = 100
     channel: int = 6

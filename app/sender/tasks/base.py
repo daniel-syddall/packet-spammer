@@ -43,8 +43,11 @@ class BaseTaskEngine(ABC):
         return 0.0
 
     def status(self) -> dict:
+        uptime = self.session_uptime
+        actual_pps = round(self._packets_sent / uptime, 1) if uptime > 0 else 0.0
         return {
             "running": self._running,
             "packets_sent": self._packets_sent,
-            "session_uptime": round(self.session_uptime, 1),
+            "session_uptime": round(uptime, 1),
+            "actual_pps": actual_pps,
         }

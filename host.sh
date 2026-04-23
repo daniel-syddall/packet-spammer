@@ -1,31 +1,26 @@
 #!/usr/bin/env bash
-# Build and start the packet-spammer container.
-# Usage:  ./host.sh           — build + start (foreground)
-#         ./host.sh -d        — build + start (detached / background)
+# Start the packet-spammer container using the pre-built image.
+# Run ./build.sh first if the image does not exist yet.
+#
+# Usage:  ./host.sh           — start in foreground
+#         ./host.sh -d        — start detached (background)
 set -e
 cd "$(dirname "$0")"
 
-# ── Ensure Docker is available ────────────────────────────────────────── #
-
-if ! command -v docker &>/dev/null; then
-    echo "[host] Docker not found — installing..."
-    curl -fsSL https://get.docker.com | sh
-    systemctl enable --now docker
-    if [ -n "$SUDO_USER" ] && ! groups "$SUDO_USER" | grep -q docker; then
-        usermod -aG docker "$SUDO_USER"
-        echo "[host] NOTE: Log out and back in (or run 'newgrp docker') before using Docker without sudo."
-    fi
-fi
+# ── Ensure Docker is running ──────────────────────────────────────────── #
 
 if ! docker info &>/dev/null; then
     echo "[host] Starting Docker service..."
     systemctl start docker
 fi
 
-# ── Build ─────────────────────────────────────────────────────────────── #
+# ── Check that the image has been built ───────────────────────────────── #
 
-echo "[host] Building image..."
-docker compose build --build-arg CACHEBUST="$(date +%s)" packet-spammer
+if ! docker image inspect packet-spammer:latest &>/dev/null; then
+    echo "[host] ERROR: Image 'packet-spammer:latest' not found."
+    echo "[host]        Run ./build.sh first to build the image."
+    exit 1
+fi
 
 # ── Start ─────────────────────────────────────────────────────────────── #
 

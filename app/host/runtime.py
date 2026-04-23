@@ -47,6 +47,17 @@ class HostRuntime:
 
     async def run(self) -> None:
         """Start all subsystems and run until cancelled."""
+        # Apply autostart: tasks with autostart=True are enabled on every boot,
+        # regardless of the last saved enabled state.
+        autostart_count = 0
+        for task in self._config.tasks:
+            if task.autostart and not task.enabled:
+                task.enabled = True
+                autostart_count += 1
+        if autostart_count:
+            logger.info("Autostart: enabled %d task(s)", autostart_count)
+            self._save_config()
+
         logger.info("Searching for USB WiFi adapters...")
         pool_ready = await asyncio.to_thread(self._pool.setup)
 

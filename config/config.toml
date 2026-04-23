@@ -24,6 +24,7 @@ type               = "standard"
 id                 = "demo0001"
 name               = "Deauth Flood"
 enabled            = false
+autostart          = false
 channel            = 6
 packets_per_second = 10
 packet             = {type = "deauth", source_mac = "aa:bb:cc:dd:ee:ff", dest_mac = "ff:ff:ff:ff:ff:ff", bssid = "aa:bb:cc:dd:ee:ff", reason = 7}
