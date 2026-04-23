@@ -1,4 +1,4 @@
-from .engine import SenderEngine
-from .interface import InterfaceManager
+from .pool import InterfacePool, ManagedInterface
+from .tasks.manager import TaskManager
 
-__all__ = ["SenderEngine", "InterfaceManager"]
+__all__ = ["InterfacePool", "ManagedInterface", "TaskManager"]

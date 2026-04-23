@@ -43,12 +43,10 @@ def main() -> None:
 
     config = load_config(args.config, ProjectConfig)
     logger.info(
-        "Starting — api=%s:%d  channel=%d  pps=%d  autostart=%s",
+        "Starting — api=%s:%d  tasks=%d",
         config.api.host,
         config.api.port,
-        config.sender.channel,
-        config.sender.packets_per_second,
-        config.sender.autostart,
+        len(config.tasks),
     )
 
     runtime = HostRuntime(config, config_path=args.config)

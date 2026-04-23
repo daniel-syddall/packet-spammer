@@ -1,6 +1,6 @@
 # ── Packet Spammer Configuration ─────────────────────────────────────────
 #
-# All values here can be changed via the web UI at runtime.
+# Manage tasks at runtime through the web UI at http://<host>:8080
 # The web UI writes changes back to this file automatically.
 
 # ── Web UI ────────────────────────────────────────────────────────────────
@@ -10,30 +10,20 @@ enabled = true
 host    = "0.0.0.0"
 port    = 8080
 
-# ── Sender ────────────────────────────────────────────────────────────────
+# ── Tasks ─────────────────────────────────────────────────────────────────
+#
+# Each [[tasks]] entry is one injection task.  type must be one of:
+#   standard       — fixed packet, fixed channel
+#   span           — staggered multi-channel cycling
+#   beacon_sequence — rotating SSID beacon flood
+#
+# Tasks are managed through the web UI; the entries below are just defaults.
 
-[sender]
-# Start transmitting immediately when the container boots.
-autostart = false
-
-# How many frames to inject per second.
+[[tasks]]
+type               = "standard"
+id                 = "demo0001"
+name               = "Deauth Flood"
+enabled            = false
+channel            = 6
 packets_per_second = 10
-
-# 802.11 channel to inject on.
-# 2.4 GHz: 1–13 (14 = Japan only)
-# 5   GHz: 36, 40, 44, 48, 52 … 165
-channel = 6
-
-# ── Packet ────────────────────────────────────────────────────────────────
-#
-# type must be one of: deauth | beacon | probe_req | disassoc | auth
-#
-# The fields below depend on the selected type.  Change the type and
-# replace the fields to match — the web UI validates and saves them for you.
-
-[packet]
-type       = "deauth"
-source_mac = "aa:bb:cc:dd:ee:ff"
-dest_mac   = "ff:ff:ff:ff:ff:ff"
-bssid      = "aa:bb:cc:dd:ee:ff"
-reason     = 7
+packet             = {type = "deauth", source_mac = "aa:bb:cc:dd:ee:ff", dest_mac = "ff:ff:ff:ff:ff:ff", bssid = "aa:bb:cc:dd:ee:ff", reason = 7}

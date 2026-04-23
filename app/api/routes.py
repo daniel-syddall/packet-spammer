@@ -1,151 +1,147 @@
-"""Project API routes — sender control and runtime configuration."""
+"""Project API routes — interface pool status and task management."""
 
-import asyncio
 import logging
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, TypeAdapter, ValidationError
+from pydantic import TypeAdapter, ValidationError
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["spammer"])
 
 # Injected at startup by HostRuntime._setup_api()
-_engine    = None
-_iface_mgr = None
+_pool      = None
+_task_mgr  = None
 _config    = None
 _save_fn   = None
 
 
-def init_project_routes(engine, iface_mgr, config, save_config_fn) -> None:
-    global _engine, _iface_mgr, _config, _save_fn
-    _engine    = engine
-    _iface_mgr = iface_mgr
+def init_project_routes(pool, task_mgr, config, save_config_fn) -> None:
+    global _pool, _task_mgr, _config, _save_fn
+    _pool      = pool
+    _task_mgr  = task_mgr
     _config    = config
     _save_fn   = save_config_fn
 
 
-# ======================== Sender Control ======================== #
+# ======================== Interface Pool ======================== #
 
-@router.get("/sender/status")
-async def sender_status() -> dict[str, Any]:
-    """Full sender + interface status snapshot polled by the web UI."""
+@router.get("/pool")
+async def pool_status() -> dict[str, Any]:
+    """Interface pool summary — adapter list and readiness."""
     return {
-        "running":           _engine.is_running,
-        "packets_sent":      _engine.packets_sent,
-        "session_uptime":    round(_engine.session_uptime, 1),
-        "packets_per_second": _config.sender.packets_per_second,
-        "channel":           _config.sender.channel,
-        "autostart":         _config.sender.autostart,
-        "interface":         _iface_mgr.interface,
-        "interface_ready":   _iface_mgr.is_ready,
-        "interface_error":   _iface_mgr.error,
-        "packet_type":       _config.packet.type,
-        "packet":            _config.packet.model_dump(),
+        "ready":      _pool.is_ready,
+        "count":      _pool.count,
+        "error":      _pool.error,
+        "interfaces": _pool.status(),
     }
 
 
-@router.post("/sender/start")
-async def sender_start() -> dict[str, str]:
-    """Begin packet injection."""
-    if not _iface_mgr.is_ready:
-        raise HTTPException(
-            status_code=503,
-            detail=_iface_mgr.error or "USB WiFi adapter not available",
-        )
-    if _engine.is_running:
-        return {"status": "already_running"}
-    _engine.start(_iface_mgr.interface)
-    return {"status": "started"}
+# ======================== Task List ======================== #
+
+@router.get("/tasks")
+async def list_tasks() -> list[dict[str, Any]]:
+    """Return status for all configured tasks."""
+    return _task_mgr.status()
 
 
-@router.post("/sender/stop")
-async def sender_stop() -> dict[str, str]:
-    """Stop packet injection."""
-    if not _engine.is_running:
-        return {"status": "already_stopped"}
-    await asyncio.to_thread(_engine.stop)
-    return {"status": "stopped"}
+@router.post("/tasks")
+async def create_task(body: dict[str, Any]) -> dict[str, Any]:
+    """Create a new task from the given config body.
 
-
-# ======================== Sender Settings ======================== #
-
-class SenderUpdate(BaseModel):
-    packets_per_second: int | None = None
-    channel:            int | None = None
-    autostart:          bool | None = None
-
-
-@router.put("/config/sender")
-async def update_sender(body: SenderUpdate) -> dict[str, Any]:
-    """Update rate, channel, and/or autostart flag.
-
-    Changes take effect immediately:
-      • rate    — hot-swapped in the running send loop
-      • channel — pushed to the interface via iw
-      • autostart — persisted to config.toml
+    The body must contain a ``type`` field: ``standard``, ``span``, or
+    ``beacon_sequence``.
     """
-    if body.packets_per_second is not None:
-        if body.packets_per_second < 1:
-            raise HTTPException(422, "packets_per_second must be ≥ 1")
-        _config.sender.packets_per_second = body.packets_per_second
-        _engine.update_rate(body.packets_per_second)
+    from app.models.config import TaskConfig
 
-    if body.channel is not None:
-        if not (1 <= body.channel <= 165):
-            raise HTTPException(422, "channel must be between 1 and 165")
-        _config.sender.channel = body.channel
-        if _iface_mgr.is_ready:
-            ok = await asyncio.to_thread(_iface_mgr.set_channel, body.channel)
-            if not ok:
-                logger.warning("Channel change to %d failed on interface", body.channel)
-
-    if body.autostart is not None:
-        _config.sender.autostart = body.autostart
-
-    _save_fn()
-    return {"status": "ok", "sender": _config.sender.model_dump()}
-
-
-# ======================== Packet Config ======================== #
-
-@router.get("/config/packet")
-async def get_packet() -> dict[str, Any]:
-    return _config.packet.model_dump()
-
-
-@router.put("/config/packet")
-async def update_packet(body: dict[str, Any]) -> dict[str, Any]:
-    """Replace the active packet configuration.
-
-    The body must contain a ``type`` field matching one of the supported
-    802.11 frame types.  All other fields are validated against that type's
-    Pydantic model.  The engine's frame is hot-swapped so injection of the
-    new packet begins on the very next send-loop iteration.
-    """
-    from app.models.config import PacketConfig
-    from app.sender.packets.factory import PacketFactory
-
-    adapter = TypeAdapter(PacketConfig)
+    adapter = TypeAdapter(TaskConfig)
     try:
-        new_packet = adapter.validate_python(body)
+        task_cfg = adapter.validate_python(body)
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail=exc.errors())
 
-    # Build the Scapy frame *before* committing so a bad config doesn't
-    # leave the engine in an inconsistent state.
-    try:
-        new_frame = PacketFactory.build(new_packet, _config.sender.channel)
-    except Exception as exc:
-        raise HTTPException(status_code=422, detail=f"Frame build failed: {exc}")
-
-    _config.packet = new_packet
-    _engine.update_frame(new_frame)
+    _task_mgr.add_task(task_cfg)
     _save_fn()
+    logger.info("Task created: %s (%s)", task_cfg.name, task_cfg.type)
+    return {"status": "created", "id": task_cfg.id}
 
-    logger.info("Packet updated → type=%s", new_packet.type)
-    return {"status": "ok", "packet": new_packet.model_dump()}
+
+# ======================== Single Task ======================== #
+
+@router.get("/tasks/{task_id}")
+async def get_task(task_id: str) -> dict[str, Any]:
+    tasks = _task_mgr.status()
+    for t in tasks:
+        if t["id"] == task_id:
+            return t
+    raise HTTPException(status_code=404, detail=f"Task {task_id!r} not found")
+
+
+@router.put("/tasks/{task_id}")
+async def update_task(task_id: str, body: dict[str, Any]) -> dict[str, Any]:
+    """Replace a task's configuration.  The task is stopped and restarted.
+
+    The ``type`` field must be present and match or change the task type.
+    The ``id`` in the body (if any) is ignored — the URL task_id is used.
+    """
+    from app.models.config import TaskConfig
+
+    body["id"] = task_id
+    adapter = TypeAdapter(TaskConfig)
+    try:
+        new_cfg = adapter.validate_python(body)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors())
+
+    try:
+        _task_mgr.update_task(task_id, new_cfg)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Task {task_id!r} not found")
+
+    _save_fn()
+    logger.info("Task updated: %s (%s)", new_cfg.name, new_cfg.type)
+    return {"status": "updated", "id": task_id}
+
+
+@router.delete("/tasks/{task_id}")
+async def delete_task(task_id: str) -> dict[str, str]:
+    try:
+        _task_mgr.remove_task(task_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Task {task_id!r} not found")
+    _save_fn()
+    logger.info("Task deleted: %s", task_id)
+    return {"status": "deleted", "id": task_id}
+
+
+# ======================== Task Control ======================== #
+
+@router.post("/tasks/{task_id}/start")
+async def start_task(task_id: str) -> dict[str, str]:
+    """Enable and start a task.  503 if no interfaces are ready."""
+    if not _pool.is_ready:
+        raise HTTPException(
+            status_code=503,
+            detail=_pool.error or "No USB WiFi adapters available",
+        )
+    try:
+        _task_mgr.start_task(task_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Task {task_id!r} not found")
+    _save_fn()
+    return {"status": "started", "id": task_id}
+
+
+@router.post("/tasks/{task_id}/stop")
+async def stop_task(task_id: str) -> dict[str, str]:
+    """Disable and stop a task."""
+    try:
+        _task_mgr.stop_task(task_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Task {task_id!r} not found")
+    _save_fn()
+    return {"status": "stopped", "id": task_id}
 
 
 # ======================== Full Config ======================== #
